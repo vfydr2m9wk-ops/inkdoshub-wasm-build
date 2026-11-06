@@ -1,0 +1,43 @@
+# Made by InkDOS Hub (Wasm Build). Started from the Hub; builds a project with Emscripten.
+name: Wasm build
+run-name: "Wasm build ${{ inputs.id }}"
+on:
+  workflow_dispatch:
+    inputs:
+      id: {required: true}
+      source: {description: Git link, required: true}
+      ref: {description: Branch or tag, required: false, default: ""}
+      commands: {description: Build commands, required: true}
+      outputs: {description: Files to keep, required: false, default: "**/*.wasm"}
+      emsdk: {description: Emscripten version, required: false, default: latest}
+permissions: {contents: read}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    container: emscripten/emsdk:${{ inputs.emsdk }}
+    steps:
+      - name: Get the source
+        env: {SRC: "${{ inputs.source }}", REF: "${{ inputs.ref }}"}
+        run: git clone --depth 1 --recursive ${REF:+--branch "$REF"} "$SRC" src
+      - name: Build
+        working-directory: src
+        env: {CMDS: "${{ inputs.commands }}"}
+        run: printf '%s\n' "$CMDS" > /tmp/build.sh && bash -ex /tmp/build.sh
+      - name: Collect the files
+        working-directory: src
+        shell: bash
+        env: {PAT: "${{ inputs.outputs }}"}
+        run: |
+          shopt -s globstar nullglob
+          mkdir -p /tmp/out
+          for f in $PAT; do
+            [ -f "$f" ] || continue
+            mkdir -p "/tmp/out/$(dirname "$f")"; cp "$f" "/tmp/out/$f"
+            b="${f%.*}"
+            for x in "$b.js" "$b.mjs" "$b.html" "$b.data" "$b.worker.js" "$b.wasm"; do [ -f "$x" ] && cp "$x" "/tmp/out/$x"; done
+          done
+          ls -laR /tmp/out | head -200
+          [ -n "$(ls -A /tmp/out)" ] || { echo "No file matched: $PAT"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with: {name: wasm-build, path: /tmp/out, retention-days: 7}
